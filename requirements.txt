@@ -1,0 +1,10 @@
+autogen-agentchat==0.4.*
+chromadb
+sentence-transformers
+tavily-python
+groq
+deepeval
+gradio
+python-dotenv
+pymupdf
+markdown-pdf

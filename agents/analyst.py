@@ -19,7 +19,8 @@ class Analyst:
                 metadata = chunk.get("metadata") or {}
                 chunk_text.append(
                     f"Chunk {index}:\n"
-                    f"Source: {metadata.get('url', 'Unknown')}\n"
+                    f"Source: {metadata.get('source_url', metadata.get('url', 'Unknown'))}\n"
+                    f"Chunk ID: {metadata.get('chunk_id', chunk.get('id', 'unknown'))}\n"
                     f"Distance: {chunk.get('distance')}\n"
                     f"Content: {chunk.get('document', '')}"
                 )

@@ -24,14 +24,26 @@ class Researcher:
             for i, result in enumerate(results):
                 content = result.get("content", "")
                 url = result.get("url", "")
+                title = result.get("title", "")
+                published_at = result.get("published_date", "") or result.get("published_at", "")
 
                 if not content:
                     continue
 
+                chunk_id = self.chroma_store.stable_id(query, url, str(i), content[:200])
                 raw_results.append(content)
                 sources.append(url)
-                metadatas.append({"url": url, "query": query})
-                ids.append(f"doc_{i}_{abs(hash(url))}")
+                metadatas.append(
+                    self.chroma_store.citation_metadata(
+                        source_url=url,
+                        title=title,
+                        published_at=published_at,
+                        chunk_id=chunk_id,
+                        agent_id="literature_reviewer",
+                        query=query,
+                    )
+                )
+                ids.append(chunk_id)
 
             if raw_results:
                 try:
@@ -42,6 +54,16 @@ class Researcher:
                     )
                 except Exception as exc:
                     print(f"Error storing documents in ChromaDB: {exc}")
+
+            # Build evidence metadata mapping (chunk_id -> source_url, title, published_at)
+            evidence_map = {}
+            for i, chunk_id in enumerate(ids):
+                evidence_map[chunk_id] = {
+                    "source_url": sources[i] if i < len(sources) else "",
+                    "title": metadatas[i].get("title", "") if i < len(metadatas) else "",
+                    "published_at": metadatas[i].get("published_at", "") if i < len(metadatas) else "",
+                    "content": raw_results[i] if i < len(raw_results) else "",
+                }
 
             combined_content = "\n\n".join(raw_results) if raw_results else "No search results found."
             summary = "No summary generated."
@@ -73,6 +95,8 @@ class Researcher:
                 "raw_results": raw_results,
                 "summary": summary,
                 "stored_count": len(raw_results),
+                "chunk_ids": ids,  # Real Chroma chunk IDs
+                "evidence_map": evidence_map,  # chunk_id -> {source_url, title, published_at, content}
             }
         except Exception as exc:
             print(f"Error during research: {exc}")
@@ -82,4 +106,6 @@ class Researcher:
                 "raw_results": [],
                 "summary": "",
                 "stored_count": 0,
+                "chunk_ids": [],
+                "evidence_map": {},
             }

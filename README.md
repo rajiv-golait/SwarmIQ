@@ -1,13 +1,15 @@
 ---
 title: SwarmIQ
-emoji: ""
-colorFrom: slate
+emoji: 🐝
+colorFrom: indigo
 colorTo: blue
-sdk: gradio
-sdk_version: "5"
+sdk: streamlit
 app_file: app.py
 pinned: false
 ---
+
+# SwarmIQ
+This is the repository for the SwarmIQ project.
 
 SwarmIQ
 =======

@@ -12,7 +12,11 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 LLM_MODEL = "llama-3.3-70b-versatile"
 FAST_MODEL = "llama-3.1-8b-instant"
-CHROMA_PERSIST_DIR = "./chroma_db"
+
+# Storage
+# - Local dev default: ./chroma_db
+# - Hugging Face Spaces persistent storage: usually mounted at /data (enable in Space settings)
+CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
 COHERENCE_THRESHOLD = 0.90
 
 # Swarm configuration

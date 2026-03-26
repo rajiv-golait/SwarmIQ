@@ -8,3 +8,5 @@ __pycache__/
 chroma_db/
 gradio_stdout.log
 gradio_stderr.log
+.venv/
+.cursor/

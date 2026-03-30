@@ -8,7 +8,7 @@ app_file: app.py
 pinned: false
 ---
 
-# SwarmIQ
+# SwarmIQ #
 This is the repository for the SwarmIQ project.
 
 SwarmIQ

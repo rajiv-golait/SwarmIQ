@@ -4,6 +4,7 @@ from memory.lance_store import LanceStore
 from memory.models import rerank
 from search.searcher import WebSearcher
 from utils.confidence import compute_confidence
+from utils.progress import emit_progress
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,14 @@ class LiteratureReviewNode:
             q_id      = question["question_id"]
             q_queries = question.get("search_queries", [question["text"]])
 
+            emit_progress(
+                f"[LitReview] Q {q_id}: {len(q_queries)} search queries "
+                f"(this step is slow: many web fetches)..."
+            )
             results = self.searcher.multi_search(q_queries, max_per_query=4)
+            emit_progress(
+                f"[LitReview] Q {q_id}: retrieved {len(results)} pages, building claims..."
+            )
 
             for result in results:
                 confidence = compute_confidence(

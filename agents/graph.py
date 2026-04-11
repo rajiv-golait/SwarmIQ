@@ -23,6 +23,7 @@ from agents.roles.synthesizer         import SynthesizerNode
 from agents.critic       import CriticNode
 from agents.gap_detector import GapDetectorNode
 from memory.lance_store  import LanceStore
+from utils.progress import set_progress_callback
 from utils.config import (
     MAX_RESEARCH_ITERATIONS,
     MAX_CRITIQUE_REVISIONS,
@@ -161,22 +162,27 @@ def run_pipeline(
 
     # Stream for UI callbacks while accumulating full final state via delta merge
     final_state = dict(initial)
-    for event in graph.stream(initial, stream_mode="updates"):
-        for node_name, node_output in event.items():
-            # Delta merge — operator.add fields accumulate, others overwrite
-            for k, v in node_output.items():
-                if k in ("evidence_chunks", "claims", "phase_log", "errors"):
-                    final_state[k] = final_state.get(k, []) + (v or [])
-                else:
-                    final_state[k] = v
+    if event_callback:
+        set_progress_callback(event_callback)
+    try:
+        for event in graph.stream(initial, stream_mode="updates"):
+            for node_name, node_output in event.items():
+                # Delta merge — operator.add fields accumulate, others overwrite
+                for k, v in node_output.items():
+                    if k in ("evidence_chunks", "claims", "phase_log", "errors"):
+                        final_state[k] = final_state.get(k, []) + (v or [])
+                    else:
+                        final_state[k] = v
 
-            # Stream phase log entries to UI callback
-            if event_callback and node_output.get("phase_log"):
-                for entry in node_output["phase_log"]:
-                    try:
-                        event_callback(entry)
-                    except Exception:
-                        pass
+                # Stream phase log entries to UI callback
+                if event_callback and node_output.get("phase_log"):
+                    for entry in node_output["phase_log"]:
+                        try:
+                            event_callback(entry)
+                        except Exception:
+                            pass
+    finally:
+        set_progress_callback(None)
 
     accepted  = final_state.get("accepted_claims",  [])
     rejected  = final_state.get("rejected_claims",  [])

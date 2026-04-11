@@ -38,7 +38,16 @@ async def health():
     return {"status": "ok"}
 
 
-@app.post("/api/run")
+@app.post(
+    "/api/run",
+    summary="Run pipeline (SSE stream)",
+    description=(
+        "Streams Server-Sent Events: `log` (phase lines), `ping` (keepalive every ~12s), "
+        "then `complete` (full JSON result) or `error`. "
+        "**Swagger UI usually buffers the entire stream** until the run finishes (often 5–20+ minutes). "
+        "Use `curl -N` or browser `EventSource` to see live events."
+    ),
+)
 async def run(request: RunRequest):
     query = (request.query or "").strip()
     if not query:
@@ -73,7 +82,12 @@ async def run(request: RunRequest):
     async def _stream() -> AsyncGenerator[dict, None]:
         _executor.submit(_run_in_thread)
         while True:
-            event_type, data = await queue.get()
+            try:
+                event_type, data = await asyncio.wait_for(queue.get(), timeout=12.0)
+            except asyncio.TimeoutError:
+                # Keeps connections alive; Swagger UI may still buffer until `complete`.
+                yield {"event": "ping", "data": "{}"}
+                continue
             yield {"event": event_type, "data": data}
             if event_type in ("complete", "error"):
                 break

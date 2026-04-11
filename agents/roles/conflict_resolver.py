@@ -5,6 +5,7 @@ from agents.state import SwarmState, Claim, NegotiationRound
 from memory.lance_store import LanceStore
 from memory.models import rerank
 from utils.config import LLM_MODEL, GROQ_API_KEY, SWARM_MAX_NEGOTIATION_ROUNDS
+from utils.progress import emit_progress
 from utils.rate_limiter import groq_limiter
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ class ConflictResolverNode:
             if not pending:
                 break
 
+            emit_progress(
+                f"[Negotiate] Round {round_num}/{SWARM_MAX_NEGOTIATION_ROUNDS} "
+                f"({len(pending)} claims)..."
+            )
             # Re-rank evidence for this round's context
             retrieved    = self.store.query(query, n_results=20)
             top_evidence = rerank(query, retrieved, top_k=5)

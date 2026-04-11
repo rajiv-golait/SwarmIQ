@@ -26,6 +26,8 @@ LANCE_PERSIST_DIR = os.getenv("LANCE_PERSIST_DIR", "./lance_db")
 JINA_BASE_URL   = "https://r.jina.ai/"
 DDG_MAX_RESULTS = int(os.getenv("DDG_MAX_RESULTS", "10"))
 JINA_TIMEOUT_S  = int(os.getenv("JINA_TIMEOUT_S",  "20"))
+# Delay between fetching each search result URL (politeness; lower = faster runs)
+SEARCH_POLITE_DELAY_S = float(os.getenv("SEARCH_POLITE_DELAY_S", "0.15"))
 
 # ── Swarm ────────────────────────────────────────────────────────────────────
 SWARM_MAX_NEGOTIATION_ROUNDS = int(os.getenv("SWARM_MAX_NEGOTIATION_ROUNDS", "3"))

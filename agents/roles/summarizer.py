@@ -6,6 +6,7 @@ from memory.lance_store import LanceStore
 from search.searcher import WebSearcher
 from utils.confidence import compute_confidence
 from utils.config import FAST_MODEL, GROQ_API_KEY
+from utils.progress import emit_progress
 from utils.rate_limiter import groq_limiter
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,9 @@ class SummarizerNode:
             f"{q['text']} news 2024 2025"
             for q in questions[:2]
         ]
+        emit_progress(
+            f"[Summarizer] News search: {len(news_queries)} queries (web fetch, can take minutes)..."
+        )
         results = self.searcher.multi_search(news_queries, max_per_query=4)
 
         all_claims: list[Claim] = []

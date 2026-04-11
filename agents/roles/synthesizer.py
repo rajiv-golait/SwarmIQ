@@ -4,6 +4,7 @@ from agents.state import SwarmState
 from memory.lance_store import LanceStore
 from memory.models import rerank
 from utils.config import LLM_MODEL, FAST_MODEL, GROQ_API_KEY
+from utils.progress import emit_progress
 from utils.rate_limiter import groq_limiter
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,8 @@ class SynthesizerNode:
         sources_ref = _cap(sources_ref, 3500)
 
         # Groq TPM limits often apply to (prompt tokens + max_tokens); keep the sum conservative.
+        emit_progress("[Synthesize] Building report (Groq, may retry if rate-limited)...")
+
         model_used   = LLM_MODEL
         report       = ""
         tier_idx     = 0

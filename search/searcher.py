@@ -15,7 +15,13 @@ from tenacity import (
 )
 
 from search.cache import get as cache_get, put as cache_put
-from utils.config import JINA_BASE_URL, JINA_TIMEOUT_S, DDG_MAX_RESULTS
+from utils.config import (
+    JINA_BASE_URL,
+    JINA_TIMEOUT_S,
+    DDG_MAX_RESULTS,
+    SEARCH_POLITE_DELAY_S,
+)
+from utils.progress import emit_progress
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +94,8 @@ class WebSearcher:
         if cached is not None:
             return [SearchResult(**r) for r in cached]
 
+        emit_progress(f"[Search] DDG+Jina: {query[:72]}{'...' if len(query) > 72 else ''}")
+
         raw_results = []
         try:
             raw_results = self._ddg_search(query, max_results=max_results)
@@ -116,7 +124,8 @@ class WebSearcher:
             results.append(SearchResult(
                 url=url, title=title, content=content[:2000]
             ))
-            time.sleep(0.5)   # polite delay — DDG bans aggressive scrapers
+            if SEARCH_POLITE_DELAY_S > 0:
+                time.sleep(SEARCH_POLITE_DELAY_S)
 
         # Cache for next time
         cache_put(query, [

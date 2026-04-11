@@ -73,9 +73,18 @@ class CoherenceScorer:
         )
 
         issues = self._issues(report, words, c1, c2, c3)
+
+        # Pipeline passed no sources — report cannot be grounded to retrieved evidence.
+        if not sources:
+            composite = min(composite, 0.5)
+            issues.append("No pipeline sources — report not grounded.")
+            passed = False
+        else:
+            passed = composite >= self.threshold
+
         return {
             "score":      composite,
-            "passed":     composite >= self.threshold,
+            "passed":     passed,
             "issues":     issues,
             "threshold":  self.threshold,
             "components": components,

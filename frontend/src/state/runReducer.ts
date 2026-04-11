@@ -12,6 +12,12 @@ const STAGE_ORDER: StageName[] = [
   'Critic',
 ];
 
+/** LangGraph runs LitReview and Summarizer in parallel after Plan — do not mark one done when the other logs. */
+const PARALLEL_STAGES: ReadonlySet<StageName> = new Set([
+  'LitReview',
+  'Summarizer',
+]);
+
 export const initialState: RunState = {
   status: 'idle',
   phases: {
@@ -51,18 +57,27 @@ export function runReducer(state: RunState, action: RunAction): RunState {
       const newPhases = { ...state.phases };
 
       if (stage) {
-        // Mark current stage as active
         newPhases[stage] = { status: 'active', message };
 
-        // Mark all previous stages as done
         const currentIndex = STAGE_ORDER.indexOf(stage);
-        for (let i = 0; i < currentIndex; i++) {
-          const prevStage = STAGE_ORDER[i];
-          if (newPhases[prevStage].status !== 'done') {
-            newPhases[prevStage] = {
-              ...newPhases[prevStage],
-              status: 'done',
-            };
+
+        if (PARALLEL_STAGES.has(stage)) {
+          // Only Plan is strictly before the parallel pair
+          newPhases.Plan = { ...newPhases.Plan, status: 'done' };
+        } else if (stage === 'GapDetect') {
+          // Fan-in: both research branches finished before gap detection
+          newPhases.Plan = { ...newPhases.Plan, status: 'done' };
+          newPhases.LitReview = { ...newPhases.LitReview, status: 'done' };
+          newPhases.Summarizer = { ...newPhases.Summarizer, status: 'done' };
+        } else {
+          for (let i = 0; i < currentIndex; i++) {
+            const prevStage = STAGE_ORDER[i];
+            if (newPhases[prevStage].status !== 'done') {
+              newPhases[prevStage] = {
+                ...newPhases[prevStage],
+                status: 'done',
+              };
+            }
           }
         }
       }
@@ -93,15 +108,12 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'ERROR_RECEIVED': {
       const errorPhases = { ...state.phases };
-      // Mark the currently active stage as error
-      const activeStage = STAGE_ORDER.find(
-        (stage) => errorPhases[stage].status === 'active'
-      );
-      if (activeStage) {
-        errorPhases[activeStage] = {
-          ...errorPhases[activeStage],
-          status: 'error',
-        };
+      // Parallel branches can both be "active"; mark every active stage as error
+      // so one branch does not stay stuck spinning after a failure.
+      for (const s of STAGE_ORDER) {
+        if (errorPhases[s].status === 'active') {
+          errorPhases[s] = { ...errorPhases[s], status: 'error' };
+        }
       }
 
       return {

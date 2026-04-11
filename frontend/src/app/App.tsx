@@ -57,6 +57,16 @@ export default function App() {
 
           <ConnectionPill isConnected={isConnected} />
 
+          {runState.status === 'error' && runState.error && (
+            <div
+              className="mb-4 p-3 rounded-lg border border-red-900/60 bg-red-950/40 text-sm text-red-200"
+              role="alert"
+            >
+              <strong className="block text-red-100 mb-1">Run failed</strong>
+              {runState.error}
+            </div>
+          )}
+
           <QueryPanel
             onRun={handleRun}
             onCancel={handleCancel}

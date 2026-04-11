@@ -6,6 +6,8 @@ edge in graph.py loops back to the planner for targeted re-search.
 """
 import json
 import logging
+from datetime import datetime
+
 from groq import Groq
 from agents.state import SwarmState, ResearchQuestion
 from utils.config import FAST_MODEL, GROQ_API_KEY
@@ -51,6 +53,7 @@ class GapDetectorNode:
                 f"{n_ev} evidence chunks, ~{n_claims_for_q} claims\n"
             )
 
+        current_date = datetime.now().strftime("%B %d, %Y")
         groq_limiter.wait_if_needed(estimated_tokens=400)
         try:
             resp = self.client.chat.completions.create(
@@ -61,6 +64,7 @@ class GapDetectorNode:
                     {
                         "role": "system",
                         "content": (
+                            f"Today's date is {current_date}. "
                             "You evaluate whether research questions have been adequately answered. "
                             "A question is adequately answered if it has ≥3 evidence chunks and ≥2 claims. "
                             "A question with 0 evidence or 0 claims is definitely unanswered. "

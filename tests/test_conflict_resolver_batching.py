@@ -147,3 +147,61 @@ def test_batch_size_is_reasonable():
     """BATCH_SIZE must be ≤ 20 to avoid token truncation."""
     assert BATCH_SIZE <= 20, f"BATCH_SIZE={BATCH_SIZE} is too large — risk of truncation"
     assert BATCH_SIZE >= 5, f"BATCH_SIZE={BATCH_SIZE} is too small — too many API calls"
+
+
+def test_groq_json_object_requires_json_word_in_messages():
+    """Groq rejects response_format=json_object unless 'json' appears in messages."""
+    claims = _make_claims(3)
+    store = MagicMock()
+    store.query.return_value = []
+    node = ConflictResolverNode(store)
+    captured: list[dict] = []
+
+    mock_resp = MagicMock()
+    mock_resp.choices = [
+        MagicMock(message=MagicMock(content=json.dumps({"votes": []})))
+    ]
+
+    def create_capture(**kwargs):
+        captured.append(kwargs)
+        return mock_resp
+
+    node.client = MagicMock()
+    node.client.chat.completions.create.side_effect = create_capture
+
+    with patch("agents.roles.conflict_resolver.rerank", return_value=[]):
+        with patch("agents.roles.conflict_resolver.groq_limiter"):
+            with patch("agents.roles.conflict_resolver.emit_progress"):
+                node.run({"query": "q", "claims": claims})
+
+    assert captured, "Groq create should have been called"
+    for call in captured:
+        if call.get("response_format", {}).get("type") != "json_object":
+            continue
+        text = " ".join(
+            m.get("content", "") for m in call.get("messages", []) if isinstance(m, dict)
+        ).lower()
+        assert "json" in text, (
+            "messages must contain 'json' for Groq json_object mode; got: "
+            f"{text[:200]}..."
+        )
+
+
+def test_batch_vote_api_error_marks_uncertain_fallback():
+    """When Groq fails, all claims in that batch become uncertain via fallback."""
+    claims = _make_claims(5)
+    store = MagicMock()
+    store.query.return_value = []
+    node = ConflictResolverNode(store)
+    node.client = MagicMock()
+    node.client.chat.completions.create.side_effect = RuntimeError("400 bad request")
+
+    state = {"query": "test", "claims": claims}
+
+    with patch("agents.roles.conflict_resolver.rerank", return_value=[]):
+        with patch("agents.roles.conflict_resolver.groq_limiter"):
+            with patch("agents.roles.conflict_resolver.emit_progress"):
+                result = node.run(state)
+
+    assert len(result["uncertain_claims"]) == 5
+    assert result["accepted_claims"] == []

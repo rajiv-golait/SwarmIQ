@@ -1,21 +1,11 @@
 import hashlib
 import logging
 import time
-import warnings
 from dataclasses import dataclass, field
 
 import requests
 import trafilatura
-try:
-    from ddgs import DDGS  # renamed package (ddgs >= 1.0)
-except ImportError:
-    # Legacy package spams RuntimeWarning on every DDGS() — silence that path only.
-    warnings.filterwarnings(
-        "ignore",
-        message=".*renamed to `ddgs`.*",
-        category=RuntimeWarning,
-    )
-    from duckduckgo_search import DDGS  # fallback for older installs
+from ddgs import DDGS
 from tenacity import (
     retry, stop_after_attempt,
     wait_exponential, retry_if_exception_type,

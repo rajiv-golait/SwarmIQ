@@ -38,12 +38,16 @@ class CriticNode:
         score  = result["score"]
         issues = result.get("issues", [])
 
-        # Sanity check: flag if we somehow returned the stub sentinel
-        if score == _STUB_SENTINEL and len(report.split()) > 100:
+        # Perfect score on a long report is suspicious only if pipeline listed sources
+        if (
+            score == _STUB_SENTINEL
+            and len(report.split()) > 100
+            and len(sources) > 0
+        ):
             logger.warning(
                 f"[Critic] ALERT: Score is exactly {_STUB_SENTINEL} on a "
-                f"{len(report.split())}-word report — verify this is real "
-                "scoring, not a stub default"
+                f"{len(report.split())}-word report with {len(sources)} sources — "
+                "verify scorer behavior"
             )
 
         passed = result.get("passed", False)

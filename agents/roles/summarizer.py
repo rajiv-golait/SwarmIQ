@@ -1,5 +1,7 @@
 import json
 import logging
+from datetime import datetime
+
 from groq import Groq
 from agents.state import SwarmState, Claim
 from memory.lance_store import LanceStore
@@ -25,8 +27,9 @@ class SummarizerNode:
             or state.get("research_questions", [])
         )
 
+        y = datetime.now().year
         news_queries = [
-            f"{q['text']} news 2024 2025"
+            f"{q['text']} news {y - 1} {y}"
             for q in questions[:2]
         ]
         emit_progress(

@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 15
 
 
+class BatchVoteFailed(Exception):
+    """Groq/API or parse failure — caller should use uncertain fallback and log clearly."""
+
+
 class ConflictResolverNode:
     def __init__(self, store: LanceStore):
         self.store  = store
@@ -32,7 +36,7 @@ class ConflictResolverNode:
         claims_batch: list[Claim],
         evidence_ctx: str,
     ) -> list[dict]:
-        """Vote on a single batch of ≤15 claims. Returns list of vote dicts."""
+        """Vote on a single batch of ≤15 claims. Raises BatchVoteFailed on API/parse errors."""
         claims_text = "\n".join(
             f"ID:{c['claim_id'][:12]} | "
             f"Conf:{c['confidence']:.2f} | "
@@ -52,10 +56,11 @@ class ConflictResolverNode:
                         "content": (
                             f"Vote on ALL {len(claims_batch)} claims. "
                             "Every claim must get a vote: accepted, rejected, or uncertain. "
-                            'Return ONLY: {"votes": [{"claim_id": "...", '
+                            "Return ONLY valid JSON with this exact shape: "
+                            '{"votes": [{"claim_id": "...", '
                             '"vote": "accepted|rejected|uncertain", '
                             '"rationale": "one sentence"}]}\n'
-                            f"You MUST return exactly {len(claims_batch)} vote objects."
+                            f"You MUST return exactly {len(claims_batch)} vote objects in the json."
                         ),
                     },
                     {
@@ -67,7 +72,8 @@ class ConflictResolverNode:
                     },
                 ],
             )
-            data  = json.loads(resp.choices[0].message.content or "{}")
+            raw = resp.choices[0].message.content or "{}"
+            data  = json.loads(raw)
             votes = data.get("votes", [])
 
             # Validate we got votes for all claims in the batch
@@ -84,14 +90,18 @@ class ConflictResolverNode:
 
         except Exception as e:
             logger.error(f"[Negotiate] Batch vote failed: {e}")
-            return [
-                {
-                    "claim_id":  c["claim_id"][:12],
-                    "vote":      "uncertain",
-                    "rationale": f"Vote failed: {e}",
-                }
-                for c in claims_batch
-            ]
+            raise BatchVoteFailed(str(e)) from e
+
+    @staticmethod
+    def _fallback_votes(claims_batch: list[Claim], err: str) -> list[dict]:
+        return [
+            {
+                "claim_id":  c["claim_id"][:12],
+                "vote":      "uncertain",
+                "rationale": f"Vote failed: {err}",
+            }
+            for c in claims_batch
+        ]
 
     def run(self, state: SwarmState) -> dict:
         all_claims = state.get("claims", [])
@@ -129,6 +139,7 @@ class ConflictResolverNode:
         rejected: list[Claim]            = []
         uncertain: list[Claim]           = []
         rounds:   list[NegotiationRound] = []
+        negotiate_phase: list[str]       = []
 
         for round_num in range(1, SWARM_MAX_NEGOTIATION_ROUNDS + 1):
             if not pending:
@@ -149,14 +160,38 @@ class ConflictResolverNode:
 
             # ── Batched voting instead of one call for all claims ──
             all_votes: list[dict] = []
+            batch_no = 0
             for i in range(0, len(pending), BATCH_SIZE):
                 batch = pending[i:i + BATCH_SIZE]
-                batch_votes = self._vote_batch(batch, evidence_ctx)
-                all_votes.extend(batch_votes)
-                logger.info(
-                    f"[Negotiate] Round {round_num} batch {i // BATCH_SIZE + 1}: "
-                    f"{len(batch_votes)} votes for {len(batch)} claims"
-                )
+                batch_no += 1
+                try:
+                    batch_votes = self._vote_batch(batch, evidence_ctx)
+                    all_votes.extend(batch_votes)
+                    logger.info(
+                        f"[Negotiate] Round {round_num} batch {batch_no}: "
+                        f"{len(batch_votes)} LLM votes for {len(batch)} claims"
+                    )
+                except BatchVoteFailed as e:
+                    batch_votes = self._fallback_votes(batch, str(e))
+                    all_votes.extend(batch_votes)
+                    logger.warning(
+                        f"[Negotiate] Round {round_num} batch {batch_no}: "
+                        f"fallback — marking {len(batch)} claims uncertain (API error)"
+                    )
+                    err_raw = str(e)
+                    err_l = err_raw.lower()
+                    if (
+                        "429" in err_raw
+                        or "rate_limit" in err_l
+                        or "tpd" in err_l
+                        or ("token" in err_l and "limit" in err_l)
+                    ):
+                        lim_msg = (
+                            f"[Negotiate] Groq rate/token limit — round {round_num} "
+                            f"batch {batch_no} fell back to uncertain verdicts"
+                        )
+                        emit_progress(lim_msg)
+                        negotiate_phase.append(lim_msg)
 
             votes = all_votes
 
@@ -212,5 +247,5 @@ class ConflictResolverNode:
             "rejected_claims":    rejected,
             "uncertain_claims":   uncertain,
             "negotiation_rounds": rounds,
-            "phase_log":          [log],
+            "phase_log":          negotiate_phase + [log],
         }

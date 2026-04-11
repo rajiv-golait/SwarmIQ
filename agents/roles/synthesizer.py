@@ -57,6 +57,26 @@ class SynthesizerNode:
             parts.append(f"[Source {i+1}] {url}\n{doc}")
         return "\n\n---\n\n".join(parts)
 
+    _REFERENCES_HEADER = re.compile(
+        r"^##\s+References\s*$", re.MULTILINE | re.IGNORECASE
+    )
+
+    @classmethod
+    def _split_body_and_references(cls, report: str) -> tuple[str, bool]:
+        """Body text before ## References, and whether that section existed."""
+        m = cls._REFERENCES_HEADER.search(report)
+        if not m:
+            return report, False
+        return report[: m.start()].rstrip(), True
+
+    @staticmethod
+    def _format_references_block(numbered: list[dict]) -> str:
+        """One line per source: [n] domain - url; numbers are 1..len (URLs deduped upstream)."""
+        lines: list[str] = []
+        for i, s in enumerate(numbered, start=1):
+            lines.append(f"[{i}] {s['domain']} - {s['url']}")
+        return "\n".join(lines)
+
     @staticmethod
     def _clamp_citations(report: str, max_source_num: int) -> tuple[str, list[str]]:
         """Ensure no [n] exceeds the number of real sources."""
@@ -95,6 +115,23 @@ class SynthesizerNode:
         uncertain_claims = state.get("uncertain_claims", [])
         evidence_chunks  = state.get("evidence_chunks",  [])
         critique_issues  = state.get("critique_issues",  [])
+
+        if not accepted_claims:
+            log = "[Synthesize] Skipped — zero accepted claims"
+            logger.warning(log)
+            placeholder = (
+                "## No Report Generated\n\n"
+                "The pipeline could not produce consensus-approved claims for this "
+                "query. Common causes: search returned insufficient evidence, claims "
+                "were filtered in negotiation, or Groq rate/token limits caused vote "
+                "fallbacks. See the activity log for details."
+            )
+            return {
+                "report":       placeholder,
+                "word_count":   0,
+                "sources_used": [],
+                "phase_log":    [log],
+            }
 
         # Build numbered source list
         seen_urls: dict[str, int] = {}
@@ -150,6 +187,7 @@ class SynthesizerNode:
         report       = ""
         tier_idx     = 0
         max_out_toks = 1536
+        synth_phase: list[str] = []
 
         for attempt in range(8):
             lim = _SYNTH_LIMITS[min(tier_idx, len(_SYNTH_LIMITS) - 1)]
@@ -212,11 +250,23 @@ class SynthesizerNode:
                     logger.warning(
                         "[Synthesize] Rate limit — fast model + tighter context"
                     )
+                    lim_msg = (
+                        "[Synthesize] Groq rate/token limit — switched to fast model "
+                        "with tighter context"
+                    )
+                    emit_progress(lim_msg)
+                    synth_phase.append(lim_msg)
                     continue
                 if ("429" in str(e) or "rate_limit" in err) and model_used == FAST_MODEL:
                     max_out_toks = min(max_out_toks, 1200)
                     tier_idx = min(tier_idx + 1, len(_SYNTH_LIMITS) - 1)
                     logger.warning("[Synthesize] Fast model rate limit — backoff")
+                    lim_msg = (
+                        "[Synthesize] Groq rate/token limit — fast model; "
+                        "retrying with smaller output budget"
+                    )
+                    emit_progress(lim_msg)
+                    synth_phase.append(lim_msg)
                     continue
                 logger.error(f"[Synthesize] Failed: {e}")
                 report = f"Synthesis failed: {e}"
@@ -224,10 +274,13 @@ class SynthesizerNode:
 
         clamp_issues: list[str] = []
         if report and n_sources > 0 and "Synthesis failed" not in report:
-            report, clamp_issues = self._clamp_citations(report, n_sources)
-
-        if "## References" not in report and sources_ref:
-            report += f"\n\n## References\n\n{sources_ref}"
+            body, _had_refs = self._split_body_and_references(report)
+            body, clamp_issues = self._clamp_citations(body, n_sources)
+            ref_block = self._format_references_block(numbered)
+            report = f"{body}\n\n## References\n\n{ref_block}"
+        elif report and "Synthesis failed" not in report:
+            body, _ = self._split_body_and_references(report)
+            report = body
 
         log = f"[Synthesize] {len(report.split())} words, {len(numbered)} sources"
         if clamp_issues:
@@ -238,5 +291,5 @@ class SynthesizerNode:
             "report":       report,
             "word_count":   len(report.split()),
             "sources_used": [s["url"] for s in numbered],
-            "phase_log":    [log],
+            "phase_log":    synth_phase + [log],
         }

@@ -1,15 +1,8 @@
-"""
-Hugging Face Spaces entrypoint.
-
-Runs the Gradio UI from `ui/gradio_app.py`.
-"""
+"""Entrypoint — launches the FastAPI server."""
 
 import os
-
-from ui.gradio_app import demo
-
+import uvicorn
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "7860"))
-    demo.launch(server_name="0.0.0.0", server_port=port)
-
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("api.server:app", host="0.0.0.0", port=port)

@@ -1,33 +1,49 @@
 import os
+import sys
+import logging
 from pathlib import Path
-
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH = PROJECT_ROOT / ".env"
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
-load_dotenv(dotenv_path=ENV_PATH)
+# ── Required — fail at startup, not mid-request ─────────────────────────────
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+if not GROQ_API_KEY:
+    raise EnvironmentError(
+        "GROQ_API_KEY is not set. "
+        "Add it to .env or set it as an environment variable."
+    )
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-LLM_MODEL = "llama-3.3-70b-versatile"
-FAST_MODEL = "llama-3.1-8b-instant"
+# ── Models ───────────────────────────────────────────────────────────────────
+LLM_MODEL  = os.getenv("LLM_MODEL",  "llama-3.3-70b-versatile")
+FAST_MODEL = os.getenv("FAST_MODEL", "llama-3.1-8b-instant")
 
-# Storage
-# - Local dev default: ./chroma_db
-# - Hugging Face Spaces persistent storage: usually mounted at /data (enable in Space settings)
-CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")
-COHERENCE_THRESHOLD = 0.90
+# ── Storage ──────────────────────────────────────────────────────────────────
+LANCE_PERSIST_DIR = os.getenv("LANCE_PERSIST_DIR", "./lance_db")
 
-# Swarm configuration
-SWARM_MODE = os.getenv("SWARM_MODE", "1").lower() in {"1", "true", "yes", "on"}
-SWARM_RUNTIME = os.getenv("SWARM_RUNTIME", "autonomous")  # "autonomous" or "sequential"
-AUTOGEN_MAX_TURNS = int(os.getenv("AUTOGEN_MAX_TURNS", "8"))
-AUTOGEN_AGENT_TIMEOUT_S = int(os.getenv("AUTOGEN_AGENT_TIMEOUT_S", "45"))
+# ── Search ───────────────────────────────────────────────────────────────────
+JINA_BASE_URL   = "https://r.jina.ai/"
+DDG_MAX_RESULTS = int(os.getenv("DDG_MAX_RESULTS", "10"))
+JINA_TIMEOUT_S  = int(os.getenv("JINA_TIMEOUT_S",  "20"))
 
-# Autonomous swarm settings
-SWARM_MAX_WORKERS = int(os.getenv("SWARM_MAX_WORKERS", "3"))
-SWARM_CONSENSUS_THRESHOLD = float(os.getenv("SWARM_CONSENSUS_THRESHOLD", "0.6"))
+# ── Swarm ────────────────────────────────────────────────────────────────────
 SWARM_MAX_NEGOTIATION_ROUNDS = int(os.getenv("SWARM_MAX_NEGOTIATION_ROUNDS", "3"))
-SWARM_ENABLE_VISUALIZATION = os.getenv("SWARM_ENABLE_VISUALIZATION", "1").lower() in {"1", "true", "yes", "on"}
-SWARM_ENABLE_NEGOTIATION = os.getenv("SWARM_ENABLE_NEGOTIATION", "1").lower() in {"1", "true", "yes", "on"}
+MAX_RESEARCH_ITERATIONS      = int(os.getenv("MAX_RESEARCH_ITERATIONS",      "2"))
+MAX_CRITIQUE_REVISIONS       = int(os.getenv("MAX_CRITIQUE_REVISIONS",       "2"))
+SWARM_ENABLE_VISUALIZATION   = os.getenv("SWARM_ENABLE_VISUALIZATION", "1").lower() in {"1", "true", "yes", "on"}
+COHERENCE_THRESHOLD          = float(os.getenv("COHERENCE_THRESHOLD", "0.75"))
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+GROQ_RPM_LIMIT = int(os.getenv("GROQ_RPM_LIMIT", "25"))
+GROQ_TPM_LIMIT = int(os.getenv("GROQ_TPM_LIMIT", "10000"))
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Use stdout so PowerShell does not treat every log line as NativeCommandError when using 2>&1.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+    stream=sys.stdout,
+    force=True,
+)

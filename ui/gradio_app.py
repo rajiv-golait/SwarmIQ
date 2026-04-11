@@ -9,9 +9,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agents.supervisor import Supervisor
+from agents.graph import run_pipeline
 from evaluation.coherence_scorer import CoherenceScorer
-from utils.config import SWARM_MODE, SWARM_RUNTIME
 
 try:
     from markdown_pdf import MarkdownPdf, Section
@@ -129,7 +128,7 @@ def format_negotiation_log(negotiation_log: list) -> str:
 
     lines = []
     for round_data in negotiation_log:
-        round_num = round_data.get("round", 0)
+        round_num = round_data.get("round_number", round_data.get("round", 0))
         claims = round_data.get("claims_reviewed", [])
         outcomes = round_data.get("outcomes", {})
         unresolved = round_data.get("unresolved", [])
@@ -218,23 +217,23 @@ def run_swarmiq(query: str, advanced_mode: bool = False):
             None,  # pdf_file
         )
 
-    supervisor = Supervisor()
-    result = supervisor.run(query)
+    result = run_pipeline(query)
 
     scorer = CoherenceScorer()
     score_result = scorer.score(query, result["report"], result["sources"])
 
     sources_block = "\n".join(result["sources"]) if result["sources"] else "No sources found."
-    log_block = "\n".join(result["session_log"]) if result["session_log"] else "No logs recorded."
+    phase_log = result.get("phase_log", [])
+    log_block = "\n".join(phase_log) if phase_log else "No logs recorded."
     score_label = "PASSED" if score_result["passed"] else "BELOW THRESHOLD"
-    conflicts_label = "Yes" if result["conflicts_detected"] else "No"
-    mode_label = (
-        "AUTONOMOUS SWARM"
-        if SWARM_MODE and SWARM_RUNTIME == "autonomous"
-        else ("SEQUENTIAL SWARM" if SWARM_MODE else "LEGACY")
-    )
+    cs = result.get("claims_summary", {}) or {}
+    conflicts_label = "Yes" if (cs.get("rejected", 0) or cs.get("uncertain", 0)) else "No"
+    mode_label = "SwarmIQ v3 · LangGraph"
 
-    stage_events = result.get("stage_events", [])
+    stage_events = [
+        {"timestamp": "", "stage": "pipeline", "message": entry}
+        for entry in phase_log
+    ]
     stage_block = (
         "\n".join(
             [
@@ -246,7 +245,10 @@ def run_swarmiq(query: str, advanced_mode: bool = False):
         else "No stage events recorded."
     )
 
-    citation_validation = result.get("citation_validation", {})
+    citation_validation = {
+        "ok": bool(score_result.get("passed")),
+        "reason": "; ".join(score_result.get("issues", [])[:5]) or "ok",
+    }
     citation_state = "PASSED" if citation_validation.get("ok") else "FAILED"
     claims_summary = result.get("claims_summary", {})
     claims_block = (
@@ -289,7 +291,7 @@ def run_swarmiq(query: str, advanced_mode: bool = False):
     )
 
     status = (
-        f"Completed in {len(stage_events)} stages | "
+        f"Completed | {len(stage_events)} log entries | "
         f"Mode: {mode_label} | "
         f"Citations: {citation_state}"
     )
@@ -302,7 +304,7 @@ def run_swarmiq(query: str, advanced_mode: bool = False):
         return report_with_meta, negotiation_output, viz_block, status, md_path, pdf_path
     else:
         # In simple mode, return clean report and hide internals
-        return doc_only, "_HIDDEN_", "_HIDDEN_", status, md_path, pdf_path
+        return doc_only, "", "", status, md_path, pdf_path
 
 
 with gr.Blocks(css=APP_CSS, theme=gr.themes.Base(), title="SwarmIQ") as demo:
@@ -314,7 +316,7 @@ with gr.Blocks(css=APP_CSS, theme=gr.themes.Base(), title="SwarmIQ") as demo:
                 elem_id="app-subtitle",
             )
             gr.Markdown(
-                f"<div class='chip-row'>Runtime: <b>{SWARM_RUNTIME}</b> | Swarm mode: <b>{'on' if SWARM_MODE else 'off'}</b></div>"
+                "<div class='chip-row'>Stack: <b>LangGraph · Groq · LanceDB · DDG/Jina</b></div>"
             )
 
             query_input = gr.Textbox(
@@ -384,7 +386,7 @@ with gr.Blocks(css=APP_CSS, theme=gr.themes.Base(), title="SwarmIQ") as demo:
     )
 
     clear_btn.click(
-        fn=lambda: ("", "_HIDDEN_", "_HIDDEN_", "Idle", "", None, None),
+        fn=lambda: ("", "", "", "Idle", "", None, None),
         inputs=[],
         outputs=[report_out, negotiation_out, viz_out, status_box, query_input, md_export, pdf_export],
     )

@@ -17,3 +17,9 @@ run_test3.py
 .venv/
 .cursor/
 .cursor_uvicorn_pid.txt
+
+# Bundled React UI (install deps locally; do not commit artifacts)
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local

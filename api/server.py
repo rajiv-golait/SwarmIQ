@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator
 
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -19,9 +21,23 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SwarmIQ API", version="3.0")
 
+_default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
+_extra = os.getenv("SWARMIQ_CORS_ORIGINS", "").strip()
+if _extra:
+    _cors_origins = _default_origins + [o.strip() for o in _extra.split(",") if o.strip()]
+else:
+    _cors_origins = _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8080"],
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

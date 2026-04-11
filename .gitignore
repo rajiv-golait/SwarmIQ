@@ -4,12 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 .deepeval/
-.gradio/
 chroma_db/
 lance_db/
 search_cache/
-gradio_stdout.log
-gradio_stderr.log
 pipeline_full.log
 pipeline_result.txt
 pipeline_console*.log

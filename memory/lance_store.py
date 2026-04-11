@@ -1,3 +1,10 @@
+"""Thread-safe vector store backed by LanceDB.
+
+Fix from run fd92dd06a5ae:
+  - Bug 6: chunk_id 0a3f8544130e appeared 3× in negotiation because
+    add_documents() used mode="append" unconditionally. Now checks for
+    existing chunk_ids and skips duplicates.
+"""
 import logging
 import threading
 import hashlib
@@ -84,9 +91,34 @@ class LanceStore:
             })
 
         with self._write_lock:
-            self._table.add(rows, mode="append")   # append, not overwrite
+            # ── Deduplicate: skip rows whose chunk_id already exists ──
+            if rows:
+                try:
+                    ids_filter = ", ".join(f"'{r['chunk_id']}'" for r in rows)
+                    existing_results = (
+                        self._table.search()
+                        .where(f"chunk_id IN ({ids_filter})")
+                        .select(["chunk_id"])
+                        .to_list()
+                    )
+                    existing_ids = {r["chunk_id"] for r in existing_results}
+                    new_rows = [r for r in rows if r["chunk_id"] not in existing_ids]
+                except Exception:
+                    # If the where query fails (empty table, etc.), insert all
+                    new_rows = rows
 
-        logger.info(f"Stored {len(rows)} chunks (run={meta.get('run_id', '')})")
+                if new_rows:
+                    self._table.add(new_rows, mode="append")
+                    skipped = len(rows) - len(new_rows)
+                    logger.info(
+                        f"Stored {len(new_rows)} new chunks"
+                        + (f" (skipped {skipped} duplicates)" if skipped else "")
+                        + f" (run={meta.get('run_id', '')})"
+                    )
+                else:
+                    logger.debug(
+                        f"All {len(rows)} chunks already exist — skipped"
+                    )
 
     def query(self, query_text: str, n_results: int = 20) -> list[dict]:
         vec = embed_query(query_text)

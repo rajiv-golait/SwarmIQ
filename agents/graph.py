@@ -4,6 +4,11 @@ Replaces:
   agents/swarm/coordinator.py
   agents/swarm/supervisor.py
   agents/supervisor.py (legacy)
+
+Fix from run fd92dd06a5ae:
+  - Bug 9: 181 claims generated, 101 entered negotiation — 80 disappeared
+    with no log entry. Added merge_and_validate node between detect_gaps
+    and negotiate to deduplicate claims and log the transition count.
 """
 from __future__ import annotations
 
@@ -73,6 +78,35 @@ def _should_revise(state: SwarmState) -> str:
     return "finish"
 
 
+def _merge_and_validate(state: SwarmState) -> dict:
+    """Audit claims before negotiation — logs duplicate claim_id density.
+
+    Does **not** return ``claims``: ``SwarmState.claims`` uses ``operator.add``,
+    so emitting a deduped list here would *append* it to the accumulated list
+    and duplicate every row.  ``ConflictResolverNode.run`` deduplicates by
+    ``claim_id`` at negotiation entry instead.
+    """
+    claims   = state.get("claims", [])
+    evidence = state.get("evidence_chunks", [])
+
+    seen: set[str] = set()
+    unique_count = 0
+    for c in claims:
+        cid = c.get("claim_id", "")
+        if cid and cid not in seen:
+            seen.add(cid)
+            unique_count += 1
+
+    removed = len(claims) - unique_count
+    log = (
+        f"[Merge] {len(claims)} claim rows, {unique_count} unique claim_ids "
+        f"({removed} duplicate rows by id) | {len(evidence)} evidence chunks"
+    )
+    logger.info(log)
+
+    return {"phase_log": [log]}
+
+
 def build_graph(store: LanceStore):
     planner     = PlannerNode(store)
     lit_review  = LiteratureReviewNode(store)
@@ -84,13 +118,14 @@ def build_graph(store: LanceStore):
 
     g = StateGraph(SwarmState)
 
-    g.add_node("plan",              planner.run)
-    g.add_node("literature_review", lit_review.run)
-    g.add_node("summarize",         summarizer.run)
-    g.add_node("detect_gaps",       gap_detect.run)
-    g.add_node("negotiate",         negotiator.run)
-    g.add_node("synthesize",        synthesizer.run)
-    g.add_node("critique",          critic.run)
+    g.add_node("plan",               planner.run)
+    g.add_node("literature_review",  lit_review.run)
+    g.add_node("summarize",          summarizer.run)
+    g.add_node("detect_gaps",        gap_detect.run)
+    g.add_node("merge_and_validate", _merge_and_validate)
+    g.add_node("negotiate",          negotiator.run)
+    g.add_node("synthesize",         synthesizer.run)
+    g.add_node("critique",           critic.run)
 
     g.set_entry_point("plan")
 
@@ -101,17 +136,18 @@ def build_graph(store: LanceStore):
     g.add_edge("literature_review", "detect_gaps")
     g.add_edge("summarize",         "detect_gaps")
 
-    # Gap loop
+    # Gap loop — "proceed" now routes through merge_and_validate
     g.add_conditional_edges(
         "detect_gaps",
         _should_research_more,
-        {"research_more": "plan", "proceed": "negotiate"},
+        {"research_more": "plan", "proceed": "merge_and_validate"},
     )
 
-    g.add_edge("negotiate",  "synthesize")
-    g.add_edge("synthesize", "critique")
+    g.add_edge("merge_and_validate", "negotiate")
+    g.add_edge("negotiate",          "synthesize")
+    g.add_edge("synthesize",         "critique")
 
-    # Critique loop — visualizer skipped (SWARM_ENABLE_VISUALIZATION=0)
+    # Critique loop
     g.add_conditional_edges(
         "critique",
         _should_revise,

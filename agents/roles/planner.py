@@ -1,4 +1,11 @@
+"""PlannerNode — decomposes research queries and validates search queries.
+
+Fix from run fd92dd06a5ae:
+  - Bug 4: 5 of 7 search queries contained "cluade" (typo of "claude").
+    Added _validate_and_fix_queries() post-processing after JSON parse.
+"""
 import json
+import re
 import logging
 from groq import Groq
 from agents.state import SwarmState, ResearchQuestion
@@ -7,6 +14,61 @@ from utils.config import FAST_MODEL, GROQ_API_KEY
 from utils.rate_limiter import groq_limiter
 
 logger = logging.getLogger(__name__)
+
+# Common planner typos — fix before token-overlap checks (Bug 4, run fd92dd06a5ae)
+_CLUADE_TYPO = re.compile(r"\bcluade\b", re.IGNORECASE)
+
+
+def _validate_and_fix_queries(
+    questions: list[ResearchQuestion],
+    original_query: str,
+) -> list[ResearchQuestion]:
+    """Ensure every generated search query is usable.
+
+    Checks:
+    1. Non-empty
+    2. Not longer than 100 chars (LLMs sometimes emit sentences)
+    3. Contains at least one token from the original query (catches typos)
+
+    If a query fails check 3, it is replaced with a corrected fallback
+    that appends the original query tokens.
+    """
+    # Extract significant tokens from the original query (len > 3)
+    original_tokens = {
+        w.lower() for w in re.findall(r'\b\w+\b', original_query)
+        if len(w) > 3
+    }
+
+    for question in questions:
+        fixed: list[str] = []
+        for q in question.get("search_queries", []):
+            q = q.strip()
+            if not q:
+                continue
+            q = _CLUADE_TYPO.sub("Claude", q)
+            if len(q) > 100:
+                q = q[:100]
+            # Check token overlap with original query
+            q_tokens = {w.lower() for w in re.findall(r'\b\w+\b', q)}
+            if original_tokens and not q_tokens.intersection(original_tokens):
+                # Typo or hallucinated query — append original query as anchor
+                original_q = q
+                q = f"{q} {original_query}"
+                logger.warning(
+                    f"[Plan] Query '{original_q[:60]}' had no token overlap "
+                    f"with original query — appended original as anchor"
+                )
+            fixed.append(q)
+
+        # If all queries were dropped, use safe fallbacks
+        if not fixed:
+            fixed = [
+                f"{original_query} overview",
+                f"{original_query} 2025 2026",
+            ]
+        question["search_queries"] = fixed
+
+    return questions
 
 
 class PlannerNode:
@@ -27,7 +89,7 @@ class PlannerNode:
                     "phase_log": ["[Plan] No unanswered questions — skipping re-plan"],
                 }
             # Generate targeted queries for unanswered questions only
-            return self._targeted_plan(unanswered, iteration)
+            return self._targeted_plan(unanswered, iteration, query)
 
         # First iteration: full decomposition
         groq_limiter.wait_if_needed(800)
@@ -65,6 +127,9 @@ class PlannerNode:
             for i, q in enumerate(questions_data)
         ]
 
+        # ── Validate and fix search queries (catches typos like "cluade") ──
+        questions = _validate_and_fix_queries(questions, query)
+
         log = f"[Plan] {len(questions)} questions generated for: {query[:60]}"
         logger.info(log)
 
@@ -76,7 +141,7 @@ class PlannerNode:
         }
 
     def _targeted_plan(
-        self, unanswered: list[ResearchQuestion], iteration: int
+        self, unanswered: list[ResearchQuestion], iteration: int, query: str,
     ) -> dict:
         """Generate targeted search queries for unanswered questions."""
         for q in unanswered:
@@ -85,6 +150,8 @@ class PlannerNode:
                     f"{q['text']} 2024",
                     f"{q['text']} research evidence",
                 ]
+        # Validate targeted queries too
+        unanswered = _validate_and_fix_queries(unanswered, query)
         log = f"[Plan] Iteration {iteration+1}: targeting {len(unanswered)} unanswered questions"
         return {
             "unanswered_questions": unanswered,

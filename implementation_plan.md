@@ -117,14 +117,14 @@ Complete rewrite from AutoGen/ChromaDB/Tavily to LangGraph/LanceDB/DDG+Jina, imp
 
 ### Phase 7: UI + Entrypoints
 
-#### [MODIFY] [gradio_app.py](file:///r:/VectorVerse/swarmiq/ui/gradio_app.py)
-- Rewrite: streaming generator via `run_pipeline`, WeasyPrint PDF, fix `_HIDDEN_` → `""`, timeout 60→120s. Preserves existing dark UI styling.
+#### [REMOVED] `ui/gradio_app.py`
+- Gradio UI removed; the project uses `Frontend/` (React) against `api/server.py` + `python app.py`.
 
 #### [MODIFY] [main.py](file:///r:/VectorVerse/swarmiq/main.py)
 - Rewrite to use `run_pipeline()` instead of legacy `Supervisor`.
 
 #### [MODIFY] [app.py](file:///r:/VectorVerse/swarmiq/app.py)
-- No significant changes needed — already delegates to `ui.gradio_app.demo`.
+- Launches uvicorn on `api.server:app` (FastAPI + SSE).
 
 ---
 
@@ -181,4 +181,4 @@ Complete rewrite from AutoGen/ChromaDB/Tavily to LangGraph/LanceDB/DDG+Jina, imp
 
 ### Manual Verification
 - Run a full pipeline on a test query to verify end-to-end flow
-- Verify Gradio UI launches and streams events correctly
+- Verify FastAPI `/api/run` streams events correctly from the Frontend (or `curl -N`)

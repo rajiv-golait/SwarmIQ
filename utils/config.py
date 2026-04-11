@@ -35,6 +35,8 @@ MAX_RESEARCH_ITERATIONS      = int(os.getenv("MAX_RESEARCH_ITERATIONS",      "2"
 MAX_CRITIQUE_REVISIONS       = int(os.getenv("MAX_CRITIQUE_REVISIONS",       "2"))
 SWARM_ENABLE_VISUALIZATION   = os.getenv("SWARM_ENABLE_VISUALIZATION", "1").lower() in {"1", "true", "yes", "on"}
 COHERENCE_THRESHOLD          = float(os.getenv("COHERENCE_THRESHOLD", "0.75"))
+# See memory/models.py — skip CrossEncoder rerank when 1/true (low-RAM / small page file).
+SWARMIQ_DISABLE_RERANK       = os.getenv("SWARMIQ_DISABLE_RERANK", "").lower() in {"1", "true", "yes", "on"}
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 GROQ_RPM_LIMIT = int(os.getenv("GROQ_RPM_LIMIT", "25"))

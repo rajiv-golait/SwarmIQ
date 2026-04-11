@@ -42,6 +42,7 @@ class CoherenceScorer:
                 "issues":    ["Empty report"],
                 "threshold": self.threshold,
                 "components": {},
+                "is_stub":   False,
             }
 
         words = len(report.split())
@@ -52,6 +53,7 @@ class CoherenceScorer:
                 "issues":    ["Report too short"],
                 "threshold": self.threshold,
                 "components": {},
+                "is_stub":   False,
             }
 
         c1 = self._citation_density(report, words)
@@ -77,6 +79,7 @@ class CoherenceScorer:
             "issues":     issues,
             "threshold":  self.threshold,
             "components": components,
+            "is_stub":    False,
         }
 
     def _citation_density(self, report: str, words: int) -> float:

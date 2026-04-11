@@ -1,4 +1,5 @@
 import logging
+import re
 from groq import Groq
 from agents.state import SwarmState
 from memory.lance_store import LanceStore
@@ -20,10 +21,12 @@ _SYNTH_LIMITS = (
 SYSTEM_PROMPT = """You are a research analyst writing a comprehensive cited report.
 
 RULES:
-1. Every factual claim MUST have inline citation [n]
-2. Use ONLY the numbered sources provided
-3. Write minimum 600 words
-4. Professional academic tone
+1. Every factual claim MUST have inline citation [n] where n is a source number you were given
+2. Use ONLY the numbered sources provided — do not invent citation numbers above N
+3. If N sources are listed ([1]..[N]), never use [n] for n > N; reuse [1]..[N] only
+4. Do not assign multiple different citation numbers to the same URL
+5. Write minimum 600 words
+6. Professional academic tone
 
 REQUIRED SECTIONS:
 ## Executive Summary
@@ -53,6 +56,26 @@ class SynthesizerNode:
             doc = (e.get("document") or "")[:per_doc]
             parts.append(f"[Source {i+1}] {url}\n{doc}")
         return "\n\n---\n\n".join(parts)
+
+    @staticmethod
+    def _clamp_citations(report: str, max_source_num: int) -> tuple[str, list[str]]:
+        """Ensure no [n] exceeds the number of real sources."""
+        if max_source_num <= 0:
+            return report, []
+        issues: list[str] = []
+        nums = [int(n) for n in re.findall(r"\[(\d+)\]", report)]
+        if nums and max(nums) > max_source_num:
+            issues.append(
+                f"Clamped citations above [{max_source_num}] "
+                f"(max seen [{max(nums)}])"
+            )
+
+            def _sub(m: re.Match[str]) -> str:
+                n = int(m.group(1))
+                return f"[{min(n, max_source_num)}]"
+
+            report = re.sub(r"\[(\d+)\]", _sub, report)
+        return report, issues
 
     @staticmethod
     def _claims_block(accepted_claims: list, max_chars: int) -> str:
@@ -118,6 +141,7 @@ class SynthesizerNode:
             for s in numbered[:18]
         )
         sources_ref = _cap(sources_ref, 3500)
+        n_sources = len(numbered)
 
         # Groq TPM limits often apply to (prompt tokens + max_tokens); keep the sum conservative.
         emit_progress("[Synthesize] Building report (Groq, may retry if rate-limited)...")
@@ -142,8 +166,9 @@ class SynthesizerNode:
                 f"Accepted Claims:\n{claims_text}"
                 f"{uncertain_text}"
                 f"{revision_note}\n\n"
-                f"Numbered Sources:\n{sources_ref}\n\n"
-                "Write the complete research paper with [n] citations."
+                f"Numbered Sources ({n_sources} total, use only [1] through "
+                f"[{max(n_sources, 1)}]):\n{sources_ref}\n\n"
+                "Write the complete research paper with inline [n] citations."
             )
             user_prompt = _cap(user_prompt, 10000)
 
@@ -197,10 +222,16 @@ class SynthesizerNode:
                 report = f"Synthesis failed: {e}"
                 break
 
+        clamp_issues: list[str] = []
+        if report and n_sources > 0 and "Synthesis failed" not in report:
+            report, clamp_issues = self._clamp_citations(report, n_sources)
+
         if "## References" not in report and sources_ref:
             report += f"\n\n## References\n\n{sources_ref}"
 
         log = f"[Synthesize] {len(report.split())} words, {len(numbered)} sources"
+        if clamp_issues:
+            log += f" | {'; '.join(clamp_issues)}"
         logger.info(log)
 
         return {

@@ -27,8 +27,5 @@ fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 sse-starlette>=2.0.0
 
-# Optional UI
-gradio>=4.44.0
-
 # Utils
 python-dotenv>=1.0.0

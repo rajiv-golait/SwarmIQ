@@ -14,13 +14,32 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import threading
 import logging
 
+from utils.config import SWARMIQ_DISABLE_RERANK
+
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 
 _embed_model  = None
 _rerank_model = None
+_rerank_load_failed = False  # after OOM / small page file, skip retries
 _embed_lock   = threading.Lock()  # separate lock for encode() calls
+
+
+def _rerank_by_vector_order(chunks: list[dict], top_k: int) -> list[dict]:
+    """Use LanceDB cosine distance order when cross-encoder is unavailable."""
+
+    def _dist(c: dict) -> float:
+        d = c.get("distance")
+        if d is None:
+            return float("inf")
+        try:
+            return float(d)
+        except (TypeError, ValueError):
+            return float("inf")
+
+    ranked = sorted(chunks, key=_dist)
+    return ranked[: min(top_k, len(chunks))]
 
 
 def get_embed_model():
@@ -39,18 +58,38 @@ def get_embed_model():
 
 
 def get_rerank_model():
-    """Get or load the cross-encoder re-ranking model."""
-    global _rerank_model
+    """Get or load the cross-encoder re-ranking model.
+
+    Returns ``None`` if ``SWARMIQ_DISABLE_RERANK`` is set, a prior load failed
+    (e.g. Windows error 1455: paging file too small), or predict OOMs.
+    """
+    global _rerank_model, _rerank_load_failed
+    if SWARMIQ_DISABLE_RERANK or _rerank_load_failed:
+        return None
     if _rerank_model is None:
         with _lock:
+            if SWARMIQ_DISABLE_RERANK or _rerank_load_failed:
+                return None
             if _rerank_model is None:
                 from sentence_transformers import CrossEncoder
+
                 model_name = os.getenv(
                     "RERANKER_MODEL",
                     "cross-encoder/ms-marco-MiniLM-L-6-v2",
                 )
-                logger.info(f"Loading re-ranker: {model_name}")
-                _rerank_model = CrossEncoder(model_name, max_length=512)
+                try:
+                    logger.info(f"Loading re-ranker: {model_name}")
+                    _rerank_model = CrossEncoder(model_name, max_length=512)
+                except (OSError, MemoryError) as e:
+                    _rerank_load_failed = True
+                    logger.warning(
+                        "Re-ranker load failed (%s: %s) — using vector-distance order "
+                        "for this process. Set a larger Windows page file, free RAM, or "
+                        "set SWARMIQ_DISABLE_RERANK=1 to skip loading.",
+                        type(e).__name__,
+                        e,
+                    )
+                    return None
     return _rerank_model
 
 
@@ -74,8 +113,25 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
     """Re-rank retrieved chunks. Returns top_k most relevant."""
     if not chunks:
         return []
-    model  = get_rerank_model()
-    pairs  = [(query, c.get("document", "")) for c in chunks]
-    scores = model.predict(pairs)
-    ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
-    return [c for _, c in ranked[:min(top_k, len(chunks))]]
+    if SWARMIQ_DISABLE_RERANK:
+        logger.info("SWARMIQ_DISABLE_RERANK set — using vector-distance order")
+        return _rerank_by_vector_order(chunks, top_k)
+
+    model = get_rerank_model()
+    if model is None:
+        return _rerank_by_vector_order(chunks, top_k)
+
+    try:
+        pairs  = [(query, c.get("document", "")) for c in chunks]
+        scores = model.predict(pairs)
+        ranked = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
+        return [c for _, c in ranked[: min(top_k, len(chunks))]]
+    except (OSError, MemoryError) as e:
+        global _rerank_load_failed
+        _rerank_load_failed = True
+        logger.warning(
+            "Re-rank predict failed (%s: %s) — falling back to vector order",
+            type(e).__name__,
+            e,
+        )
+        return _rerank_by_vector_order(chunks, top_k)
